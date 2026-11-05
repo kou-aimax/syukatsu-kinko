@@ -559,7 +559,7 @@ table.cmp .cname:hover{color:var(--accent)}
     $('calGrid').replaceChildren(...cells);
   }
 
-  const CLOCK_STYLES = { '12h':'腕時計型（内側＝午前・外側＝午後）', '24':'24時間（0時が上）', 'noon':'24時間（正午が上）' };
+  const CLOCK_STYLES = { '12h':'腕時計型（内側＝午前・外側＝午後）', '24':'24時間（0時が上）' };
   function clockSVG(ds, evs){
     const style = CLOCK_STYLES[data.settings.clockStyle] ? data.settings.clockStyle : '12h';
     const C = 160;
@@ -606,8 +606,7 @@ table.cmp .cname:hover{color:var(--accent)}
       });
       if (nowM != null){ const pmSide = nowM >= 720, a = pmSide ? angPM(nowM) : angAM(nowM), R = pmSide ? OUT : IN; s += line(R[0]-10, R[1], a, 'var(--ink)', 2) + `<circle cx="${xy(R[0]-10,a)[0]}" cy="${xy(R[0]-10,a)[1]}" r="3" style="fill:var(--ink)"/>`; }
     } else {
-      const shift = style === 'noon' ? 720 : 0;
-      const ang = (m) => ((m - shift) / 1440) * Math.PI * 2 - Math.PI / 2;
+      const ang = (m) => (m / 1440) * Math.PI * 2 - Math.PI / 2;
       const R0 = 78, R1 = 128;
       s += ring(blocks, R0, R1, ang, 11);
       for (let h = 0; h < 24; h++){
@@ -627,7 +626,7 @@ table.cmp .cname:hover{color:var(--accent)}
   function drawClock(){ $('clockWrap').innerHTML = clockSVG(selDate, eventsOn(selDate)); }
   let clockHintTimer = null;
   function cycleClock(){
-    const keys = ['12h','24','noon'];
+    const keys = ['12h','24'];
     const cur = CLOCK_STYLES[data.settings.clockStyle] ? data.settings.clockStyle : '12h';
     data.settings.clockStyle = keys[(keys.indexOf(cur) + 1) % keys.length];
     scheduleSave(); drawClock();
