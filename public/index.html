@@ -300,6 +300,9 @@ table.cmp .cname{font-weight:600;background:none;border:0;padding:0;cursor:point
 .grp-body details summary{list-style:none;display:inline-flex;align-items:center;cursor:pointer}
 .grp-body details summary::-webkit-details-marker{display:none}
 .grp-body details[open] textarea{margin-top:8px}
+.nk{display:grid;gap:8px;padding-top:4px;border-top:.5px solid var(--line)}
+.nk-name{display:inline-flex;align-items:center;gap:8px}
+.nk .sw{width:12px;height:12px;border-radius:50%}
 @media (prefers-reduced-motion: reduce){*{transition:none!important}}
 </style>
 </head>
@@ -352,6 +355,23 @@ table.cmp .cname{font-weight:600;background:none;border:0;padding:0;cursor:point
           <p class="note">このアプリが触れるのは、このアプリが作ったファイルだけです。ほかの写真や書類は見えません。運営者のサーバーにはデータを送りません。</p>
           <button class="btn primary" type="button" id="driveSheetBtn" hidden>Googleドライブに接続</button>
           <button class="btn danger" type="button" id="driveDisconnect" hidden>ドライブとの接続を解除</button>
+        </div>
+      </section>
+
+      <section class="grp">
+        <h3>通知（Googleカレンダー）</h3>
+        <div class="grp-body">
+          <p class="note">あなたのGoogleカレンダーに、アプリ専用のカレンダー「就活マイページ金庫」を作って、そこに予定を入れます。通知はGoogleカレンダーのアプリから届きます。普段の予定には触れません。</p>
+          <p class="note" id="notifyNA">プレビュー版では使えません。公開サイトで使えます。</p>
+          <button class="btn primary" type="button" id="notifyStart" hidden>Googleカレンダーの通知を使う</button>
+          <div id="notifyBody" hidden style="display:grid;gap:12px">
+            <p class="state" id="notifyState"></p>
+            <button class="btn" type="button" id="notifyRegrant" hidden>もう一度許可する</button>
+            <p class="note">送る予定の種類と、通知のタイミングを選べます（最大5つ）。ここを変えると、登録済みの予定にも反映されます。予定ごとに変えたいときは、予定の編集画面で選べます。</p>
+            <div id="notifyKinds" style="display:grid;gap:12px"></div>
+            <p class="note">通知はあくまで補助です。iPhoneの標準カレンダーでGoogleの予定を見ている場合、通知が鳴らないことがあります。Googleカレンダーのアプリで通知をオンにしてください。予定の変更はこのアプリで行ってください（カレンダー側で変えても、アプリには戻りません）。</p>
+            <button class="btn danger" type="button" id="notifyRemove">通知をやめて、カレンダーを削除</button>
+          </div>
         </div>
       </section>
 
@@ -469,6 +489,15 @@ table.cmp .cname{font-weight:600;background:none;border:0;padding:0;cursor:point
         </div>
         <p class="note" id="evBiNote" hidden>隔週は「いつから」の日を含む週を1回目として、2週間ごとに入ります。</p>
       </div>
+      <div class="field" id="evNotifyField" hidden><span class="lbl">通知（Googleカレンダー）</span>
+        <div class="seg">
+          <label><input type="radio" name="evNotify" id="nmode-global" value="global" checked>全体の設定</label>
+          <label><input type="radio" name="evNotify" id="nmode-custom" value="custom">この予定だけ変える</label>
+          <label><input type="radio" name="evNotify" id="nmode-off" value="off">送らない</label>
+        </div>
+        <div class="seg" id="evNotifyChips" hidden></div>
+        <p class="note" id="evNotifyHint"></p>
+      </div>
       <p class="err" id="evErr"></p>
       <div class="d-actions">
         <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -500,6 +529,7 @@ table.cmp .cname{font-weight:600;background:none;border:0;padding:0;cursor:point
   const CLIENT_ID = '397026026186-47g0rsp0opb4ihghhm275o8nm5af1dkq.apps.googleusercontent.com';
   const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file'; // このアプリが作ったファイルだけを扱う
   const DRIVE_FILE = 'shukatsu-kinko-data.json';
+  const CAL_SCOPE = 'https://www.googleapis.com/auth/calendar.app.created'; // このアプリが作ったカレンダーだけを扱う
   const WD = ['日','月','火','水','木','金','土'];
   const KINDS = {
     shukatsu:{ label:'就活', color:'var(--k-shu)' },
@@ -548,6 +578,8 @@ table.cmp .cname{font-weight:600;background:none;border:0;padding:0;cursor:point
     d.answers = Array.isArray(d.answers) ? d.answers : [];
     d.submissions = Array.isArray(d.submissions) ? d.submissions : [];
     d.settings = Object.assign({ coSort:'deadline', clockStyle:'12h' }, d.settings || {});
+    d.settings.notify = Object.assign({ enabled:false, calendarId:null, kinds:{ shukatsu:[1440, 60], deadline:[4320, 1440], class:null, job:null, other:null } }, d.settings.notify || {});
+    d.calMap = (d.calMap && typeof d.calMap === 'object') ? d.calMap : {};
     d.companies.forEach(c => {
       c.stage = c.stage || '気になる'; c.memos = Array.isArray(c.memos) ? c.memos : [];
       c.memoSort = c.memoSort || 'new'; c.hidden = !!c.hidden; c.fixedOT = !!c.fixedOT;
@@ -595,12 +627,13 @@ table.cmp .cname{font-weight:600;background:none;border:0;padding:0;cursor:point
       });
       this.available = true; this.fileId = Meta.get().fileId || null; refreshStatus();
     },
-    connect(){ setDriveError(''); this.client.requestAccessToken({ prompt: Meta.get().linked ? '' : 'consent' }); },
+    connect(){ setDriveError(''); this.client.requestAccessToken({ prompt: Meta.get().linked ? '' : 'consent', scope: DRIVE_SCOPE + (data.settings.notify.enabled ? ' ' + CAL_SCOPE : '') }); },
     async onToken(r){
       if (!r || r.error || !r.access_token){ setDriveError('Googleドライブに接続できませんでした。もう一度お試しください。'); refreshStatus(); return; }
       if (window.google && google.accounts.oauth2.hasGrantedAllScopes && !google.accounts.oauth2.hasGrantedAllScopes(r, DRIVE_SCOPE)){
         setDriveError('ドライブへの保存が許可されませんでした。もう一度接続して、チェックを入れて許可してください。'); refreshStatus(); return;
       }
+      this.calGranted = !!(window.google && google.accounts.oauth2.hasGrantedAllScopes && google.accounts.oauth2.hasGrantedAllScopes(r, CAL_SCOPE));
       this.token = r.access_token; this.expiresAt = Date.now() + ((Number(r.expires_in) || 3600) - 60) * 1000;
       Meta.set({ linked:true }); await this.sync();
     },
@@ -661,14 +694,180 @@ table.cmp .cname{font-weight:600;background:none;border:0;padding:0;cursor:point
         }
         setDriveError('');
       } catch(e){ if (e.message !== 'auth') setDriveError('ドライブのデータを読み込めませんでした。通信を確認して、もう一度「ドライブと同期」を押してください。'); }
-      this.busy = false; refreshStatus();
+      this.busy = false; refreshStatus(); Cal.schedule();
     },
     disconnect(){
       try { if (this.token) google.accounts.oauth2.revoke(this.token, () => {}); } catch(e){}
       this.token = null; this.fileId = null; Meta.set({ linked:false, fileId:null }); refreshStatus();
     },
   };
-  function adoptRemote(remote){ data = remote; Storage.save(data); Meta.set({ dirty:false, fileId:Drive.fileId }); renderAll(); }
+  function adoptRemote(remote){ data = remote; Storage.save(data); Meta.set({ dirty:false, fileId:Drive.fileId }); renderAll(); Cal.schedule(); }
+  // ---------- Googleカレンダー通知（アプリ専用カレンダーへの一方向の反映） ----------
+  const CAL_API = 'https://www.googleapis.com/calendar/v3';
+  const TZ = 'Asia/Tokyo';
+  const REMIND_OPTS = [[10080,'1週間前'],[4320,'3日前'],[1440,'前日'],[180,'3時間前'],[60,'1時間前'],[30,'30分前'],[10,'10分前']];
+  const remindText = (arr) => !Array.isArray(arr) ? '送らない' : arr.length ? arr.slice().sort((a,b) => b - a).map(m => (REMIND_OPTS.find(o => o[0] === m) || [0, m + '分前'])[1]).join('・') : '通知なし';
+  function firstOccurrence(ev){
+    const base = Object.assign({}, ev, { skip:[] }), s = parseYmd(ev.from || todayStr());
+    for (let i = 0; i < 400; i++){ const ds = ymd(new Date(s.getFullYear(), s.getMonth(), s.getDate() + i)); if (ev.until && ds > ev.until) return null; if (occursOn(base, ds)) return ds; }
+    return null;
+  }
+  function calBody(ev, rem){
+    const co = ev.companyId ? companyById(ev.companyId) : null;
+    const recurring = ev.repeat === 'weekly' || ev.repeat === 'biweekly';
+    const startDate = recurring ? firstOccurrence(ev) : ev.date;
+    if (!startDate) return null;
+    const sMin = toMin(ev.start), eMin = ev.kind === 'deadline' ? sMin + 15 : toMin(ev.end);
+    const dt = (ds, min) => { const d = parseYmd(ds); d.setMinutes(min); return `${ymd(d)}T${pad(d.getHours())}:${pad(d.getMinutes())}:00`; };
+    const body = {
+      summary: (ev.kind === 'deadline' ? '【締切】' : '') + ev.title + (co ? `（${companyName(co)}）` : ''),
+      description: '就活マイページ金庫から登録した予定です。変更はアプリで行ってください。',
+      start: { dateTime: dt(startDate, sMin), timeZone: TZ }, end: { dateTime: dt(startDate, eMin), timeZone: TZ },
+      reminders: { useDefault: false, overrides: rem.slice(0, 5).map(m => ({ method:'popup', minutes:m })) },
+    };
+    if (recurring){
+      let r = 'RRULE:FREQ=WEEKLY;WKST=SU;BYDAY=' + (ev.weekdays || []).slice().sort().map(w => ['SU','MO','TU','WE','TH','FR','SA'][w]).join(',');
+      if (ev.repeat === 'biweekly') r += ';INTERVAL=2';
+      if (ev.until){ const u = parseYmd(ev.until); u.setHours(23, 59, 59); r += ';UNTIL=' + u.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, ''); }
+      body.recurrence = [r];
+      const ex = (ev.skip || []).filter(s => s >= startDate).sort();
+      if (ex.length) body.recurrence.push('EXDATE;TZID=' + TZ + ':' + ex.map(s => s.replace(/-/g, '') + 'T' + pad(Math.floor(sMin / 60)) + pad(sMin % 60) + '00').join(','));
+    }
+    return body;
+  }
+  const Cal = {
+    busy:false, again:false, timer:null, error:'',
+    ready(){ return !!(Drive.token && Drive.calGranted && data.settings.notify.enabled); },
+    async api(url, opts = {}){
+      if (!Drive.token || Date.now() > Drive.expiresAt){ Drive.expire(); throw new Error('auth'); }
+      const res = await fetch(url, Object.assign({}, opts, { headers: Object.assign({ 'Content-Type':'application/json' }, opts.headers || {}, { Authorization: 'Bearer ' + Drive.token }) }));
+      if (res.status === 401){ Drive.expire(); throw new Error('auth'); }
+      if (res.status === 404 || res.status === 410) throw new Error('gone');
+      if (!res.ok) throw new Error('http ' + res.status);
+      return res;
+    },
+    desired(){
+      const out = {}, n = data.settings.notify, cutoff = ymd(new Date(Date.now() - 30 * 864e5));
+      if (!n.enabled) return out;
+      data.events.forEach(ev => {
+        if (!visibleEv(ev)) return;
+        const rem = ev.notify === 'off' ? null : Array.isArray(ev.notify) ? ev.notify : n.kinds[ev.kind];
+        if (!Array.isArray(rem)) return;
+        if (ev.repeat !== 'weekly' && ev.repeat !== 'biweekly' && ev.date < cutoff) return;
+        const body = calBody(ev, rem); if (body) out[ev.id] = body;
+      });
+      return out;
+    },
+    pendingCount(){
+      if (!data.settings.notify.enabled) return 0;
+      const want = this.desired(); let n = 0;
+      for (const id in want){ const m = data.calMap[id]; if (!m || m.h !== JSON.stringify(want[id])) n++; }
+      for (const id in data.calMap) if (!want[id]) n++;
+      return n;
+    },
+    schedule(){ refreshNotifyUI(); if (!this.ready()) return; clearTimeout(this.timer); this.timer = setTimeout(() => this.sync(), 1200); },
+    async ensureCalendar(){
+      const n = data.settings.notify;
+      if (n.calendarId){ try { await this.api(`${CAL_API}/calendars/${encodeURIComponent(n.calendarId)}`); return n.calendarId; } catch(e){ if (e.message !== 'gone') throw e; } }
+      const r = await this.api(`${CAL_API}/calendars`, { method:'POST', body: JSON.stringify({ summary:'就活マイページ金庫', description:'就活マイページ金庫が作ったカレンダーです。予定の変更はアプリで行ってください。', timeZone: TZ }) });
+      n.calendarId = (await r.json()).id; data.calMap = {};
+      return n.calendarId;
+    },
+    async sync(){
+      if (!this.ready()) return;
+      if (this.busy){ this.again = true; return; }
+      this.busy = true; this.error = ''; refreshNotifyUI();
+      try {
+        const cal = encodeURIComponent(await this.ensureCalendar());
+        const want = this.desired();
+        for (const [id, body] of Object.entries(want)){
+          const h = JSON.stringify(body), m = data.calMap[id];
+          if (m && m.h === h) continue;
+          let gid = m && m.gid;
+          if (gid){ try { await this.api(`${CAL_API}/calendars/${cal}/events/${encodeURIComponent(gid)}`, { method:'PUT', body:h }); } catch(e){ if (e.message !== 'gone') throw e; gid = null; } }
+          if (!gid){ const r = await this.api(`${CAL_API}/calendars/${cal}/events`, { method:'POST', body:h }); gid = (await r.json()).id; }
+          data.calMap[id] = { gid, h };
+        }
+        for (const id of Object.keys(data.calMap)){
+          if (want[id]) continue;
+          try { await this.api(`${CAL_API}/calendars/${cal}/events/${encodeURIComponent(data.calMap[id].gid)}`, { method:'DELETE' }); } catch(e){ if (e.message !== 'gone') throw e; }
+          delete data.calMap[id];
+        }
+      } catch(e){
+        this.error = e.message === 'auth' ? 'Googleとの接続が切れました（1時間ごとに切れます）。「ドライブと同期」を押すと、続きを反映します。' : 'カレンダーへの反映に失敗しました。通信を確認してください。次の変更のときに、もう一度反映します。';
+      }
+      persist(true);
+      this.busy = false; refreshNotifyUI();
+      if (this.again){ this.again = false; this.schedule(); }
+    },
+    async removeAll(){
+      const id = data.settings.notify.calendarId;
+      if (id){ try { await this.api(`${CAL_API}/calendars/${encodeURIComponent(id)}`, { method:'DELETE' }); } catch(e){ if (e.message !== 'gone') throw e; } }
+    },
+  };
+  function refreshNotifyUI(){
+    if (!data || !$('notifyState')) return;
+    const n = data.settings.notify;
+    if (!n.enabled) return;
+    const p = Cal.pendingCount();
+    let t;
+    if (Drive.token && !Drive.calGranted) t = 'カレンダーへのアクセスが許可されていません。下の「もう一度許可する」から、チェックを入れて許可してください。';
+    else if (Cal.busy) t = 'カレンダーに反映中…';
+    else if (Cal.error) t = Cal.error;
+    else if (!Cal.ready()) t = p ? `未反映 ${p}件：「ドライブと同期」を押すと、カレンダーに反映します。` : 'カレンダーに反映済み';
+    else t = p ? `反映待ち ${p}件` : 'カレンダーに反映済み';
+    $('notifyState').textContent = t;
+    $('notifyRegrant').hidden = !(Drive.token && !Drive.calGranted);
+  }
+  function remindChips(container, selected, onChange, idPrefix){
+    container.replaceChildren(...REMIND_OPTS.map(([m, label]) => el('label', {},
+      el('input', { type:'checkbox', id:`${idPrefix}-${m}`, value:String(m), checked: selected.includes(m), onchange: (e) => {
+        const boxes = [...container.querySelectorAll('input:checked')];
+        if (boxes.length > 5){ e.target.checked = false; return; }
+        onChange(boxes.map(b => Number(b.value)).sort((a, b) => b - a));
+      } }), label)));
+  }
+  function renderNotify(){
+    if (!data) return;
+    const n = data.settings.notify;
+    $('notifyNA').hidden = Drive.available;
+    $('notifyStart').hidden = n.enabled || !Drive.available;
+    $('notifyBody').hidden = !n.enabled;
+    if (!n.enabled) return;
+    $('notifyKinds').replaceChildren(...Object.entries(KINDS).map(([k, v]) => {
+      const on = Array.isArray(n.kinds[k]);
+      const chips = el('div', { class:'seg' });
+      if (on) remindChips(chips, n.kinds[k], (arr) => { n.kinds[k] = arr; scheduleSave(); }, `rem-${k}`);
+      return el('div', { class:'nk' },
+        el('label', { class:'check' }, el('span', { class:'nk-name' }, el('span', { class:'sw', style:`background:${v.color}` }), `${v.label}を送る`),
+          el('input', { type:'checkbox', id:`nk-${k}`, checked:on, onchange:(e) => { n.kinds[k] = e.target.checked ? [1440] : null; scheduleSave(); renderNotify(); } })),
+        on ? chips : null);
+    }));
+    refreshNotifyUI();
+  }
+  let formNotifyCustom = [];
+  function fillNotifyForm(base){
+    const on = data.settings.notify.enabled; $('evNotifyField').hidden = !on; if (!on) return;
+    const mode = base.notify === 'off' ? 'off' : Array.isArray(base.notify) ? 'custom' : 'global';
+    $(`nmode-${mode}`).checked = true;
+    formNotifyCustom = (Array.isArray(base.notify) ? base.notify : (data.settings.notify.kinds[base.kind] || [1440])).slice();
+    remindChips($('evNotifyChips'), formNotifyCustom, (arr) => { formNotifyCustom = arr; }, 'evrem');
+    updateNotifyHint();
+  }
+  function updateNotifyHint(){
+    if (!data || !data.settings.notify.enabled) return;
+    const mode = (document.querySelector('input[name=evNotify]:checked') || {}).value || 'global';
+    $('evNotifyChips').hidden = mode !== 'custom';
+    $('evNotifyHint').textContent = mode === 'global' ? `全体の設定（${KINDS[formKind()].label}）：${remindText(data.settings.notify.kinds[formKind()])}` : mode === 'off' ? 'この予定はカレンダーに送りません。' : '最大5つまで選べます。';
+  }
+  function readNotifyForm(){
+    if (!data.settings.notify.enabled) return editing ? editing.notify : undefined;
+    const mode = (document.querySelector('input[name=evNotify]:checked') || {}).value || 'global';
+    if (mode === 'global') return undefined;
+    if (mode === 'off') return 'off';
+    return formNotifyCustom.length ? formNotifyCustom.slice() : 'off';
+  }
+
   function showConflict(remote){
     const count = (d) => `企業${d.companies.length}社・予定${d.events.length}件・ES${d.answers.length}件`;
     const when = (d) => d.savedAt ? fmtStamp(d.savedAt) : '不明';
@@ -676,11 +875,12 @@ table.cmp .cname{font-weight:600;background:none;border:0;padding:0;cursor:point
     $('conflict').hidden = false; $('conflict').scrollIntoView({ block:'nearest' });
   }
 
-  function persist(){
+  function persist(quiet){
     data.savedAt = Date.now();
     const ok = Storage.save(data);
     Meta.set({ dirty:true });
     if (Drive.token) Drive.scheduleUpload();
+    if (!quiet) Cal.schedule();
     refreshStatus(ok);
   }
   function scheduleSave(){ setStatus('保存中…'); clearTimeout(saveTimer); saveTimer = setTimeout(() => { saveTimer = null; persist(); }, 300); }
@@ -1242,6 +1442,7 @@ table.cmp .cname{font-weight:600;background:none;border:0;padding:0;cursor:point
     $('evDateField').hidden = rep !== 'none';
     $('evWeekly').hidden = rep === 'none';
     $('evBiNote').hidden = rep !== 'biweekly';
+    updateNotifyHint();
   }
   function openForm(ev, opts = {}){
     editing = ev; formFromDate = opts.fromDate || null;
@@ -1264,6 +1465,7 @@ table.cmp .cname{font-weight:600;background:none;border:0;padding:0;cursor:point
     $('evSkip').hidden = !(ev && (ev.repeat === 'weekly' || ev.repeat === 'biweekly') && formFromDate);
     if (!$('evSkip').hidden) $('evSkip').textContent = `${fmtMD(formFromDate)}だけ休み`;
     syncForm();
+    fillNotifyForm(base);
     $('evOverlay').hidden = false;
     setTimeout(() => $('evTitle').focus(), 0);
   }
@@ -1278,7 +1480,7 @@ table.cmp .cname{font-weight:600;background:none;border:0;padding:0;cursor:point
     const kind = formKind(), rep = formRep();
     const ev = { id: editing ? editing.id : uid(), title: $('evTitle').value.trim(), kind,
       companyId: (kind === 'shukatsu' || kind === 'deadline') ? ($('evCompany').value || null) : null,
-      repeat: rep, skip: editing ? (editing.skip || []) : [] };
+      repeat: rep, skip: editing ? (editing.skip || []) : [], notify: readNotifyForm() };
     if (!ev.title){ err.textContent = 'タイトルを入れてください。'; return; }
     if (kind === 'deadline'){
       if (!$('evDead').value){ err.textContent = '締切の時刻を入れてください。'; return; }
@@ -1347,7 +1549,16 @@ table.cmp .cname{font-weight:600;background:none;border:0;padding:0;cursor:point
     const t = document.getElementById(`atitle-${a.id}`); if (t) t.focus();
   });
 
-  $('backupToggle').addEventListener('click', () => { const s = $('sheet'); s.hidden = !s.hidden; $('backupMsg').textContent = ''; $('restoreErr').textContent = ''; });
+  $('backupToggle').addEventListener('click', () => { const s = $('sheet'); s.hidden = !s.hidden; $('backupMsg').textContent = ''; $('restoreErr').textContent = ''; renderNotify(); });
+  document.querySelectorAll('input[name=evNotify]').forEach(r => r.addEventListener('change', updateNotifyHint));
+  $('notifyStart').addEventListener('click', () => { if (!Drive.available) return; data.settings.notify.enabled = true; persist(true); renderNotify(); Drive.connect(); });
+  $('notifyRegrant').addEventListener('click', () => Drive.connect());
+  $('notifyRemove').addEventListener('click', (e) => armButton(e.currentTarget, 'もう一度押すとカレンダーを削除', async () => {
+    const n = data.settings.notify;
+    if (n.calendarId && !Cal.ready()){ $('notifyState').textContent = 'カレンダーを削除するには、先に「ドライブと同期」を押してください。'; return; }
+    try { await Cal.removeAll(); } catch(err){ $('notifyState').textContent = 'カレンダーを削除できませんでした。通信を確認してください。'; return; }
+    n.enabled = false; n.calendarId = null; data.calMap = {}; persist(true); renderNotify();
+  }));
   $('copyBackup').addEventListener('click', async () => {
     const text = JSON.stringify(data); const out = $('backupOut');
     try { await navigator.clipboard.writeText(text); $('backupMsg').textContent = 'コピーしました。メモアプリなどに貼って保管してください。'; out.hidden = true; }
