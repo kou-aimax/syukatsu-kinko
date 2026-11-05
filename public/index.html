@@ -338,7 +338,7 @@ table.cmp .cname:hover{color:var(--accent)}
       <h2 id="evTitleH">予定を追加</h2>
       <div class="field"><label for="evTitle">タイトル</label><input id="evTitle" type="text" placeholder="例：一次面接／線形代数／居酒屋バイト" required></div>
       <div class="field"><span class="lbl">種類</span><div class="seg" id="evKinds"></div></div>
-      <div class="field" id="evCoField"><label for="evCompany">企業（就活の予定・締切のとき）</label><select id="evCompany"></select></div>
+      <div class="field" id="evCoField"><label for="evCompany">企業（就活の予定・締切のとき）</label><select id="evCompany"></select><input id="evNewCo" type="text" placeholder="新しい企業の名前（例：株式会社〇〇）" aria-label="新しい企業の名前" hidden></div>
       <div class="times" id="evTimes">
         <div class="field"><label for="evStart">開始</label><input id="evStart" type="time" step="300"></div>
         <div class="field"><label for="evEnd">終了</label><input id="evEnd" type="time" step="300"></div>
@@ -971,11 +971,12 @@ table.cmp .cname:hover{color:var(--accent)}
     editing = ev; formFromDate = opts.fromDate || null;
     $('evTitleH').textContent = ev ? '予定を編集' : '予定を追加';
     $('evErr').textContent = '';
-    $('evCompany').replaceChildren(el('option', { value:'', text:'（なし）' }), ...data.companies.filter(c => !c.hidden || (ev && ev.companyId === c.id)).map(c => el('option', { value:c.id, text:companyName(c) })));
+    $('evCompany').replaceChildren(el('option', { value:'', text:'（なし）' }), ...data.companies.filter(c => !c.hidden || (ev && ev.companyId === c.id)).map(c => el('option', { value:c.id, text:companyName(c) })), el('option', { value:'__new', text:'＋ 新しい企業を追加' }));
     const base = ev || { title:'', kind: opts.kind || 'other', companyId: opts.companyId || '', start:'10:00', end:'11:00', repeat:'none', date: selDate, weekdays:[parseYmd(selDate).getDay()], from: selDate, until:'' };
     $('evTitle').value = base.title;
     $(`kind-${base.kind}`).checked = true;
     $('evCompany').value = base.companyId || '';
+    $('evNewCo').value = ''; $('evNewCo').hidden = true;
     $('evStart').value = base.kind === 'deadline' ? '10:00' : base.start;
     $('evEnd').value = base.kind === 'deadline' ? '11:00' : (base.end || '11:00');
     $('evDead').value = base.kind === 'deadline' ? base.start : '23:59';
@@ -991,6 +992,7 @@ table.cmp .cname:hover{color:var(--accent)}
     setTimeout(() => $('evTitle').focus(), 0);
   }
   function closeForm(){ $('evOverlay').hidden = true; editing = null; formFromDate = null; }
+  $('evCompany').addEventListener('change', () => { const isNew = $('evCompany').value === '__new'; $('evNewCo').hidden = !isNew; if (isNew) $('evNewCo').focus(); });
   $('evCancel').addEventListener('click', closeForm);
   $('evOverlay').addEventListener('click', (e) => { if (e.target === $('evOverlay')) closeForm(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape'){ if (!$('evOverlay').hidden) closeForm(); $('payOverlay').hidden = true; } });
@@ -1018,6 +1020,14 @@ table.cmp .cname:hover{color:var(--accent)}
       if (!ev.weekdays.length){ err.textContent = '曜日を1つ以上選んでください。'; return; }
       ev.from = $('evFrom').value || todayStr(); ev.until = $('evUntil').value || '';
       if (ev.until && ev.until < ev.from){ err.textContent = '「いつまで」は「いつから」より後にしてください。'; return; }
+    }
+    if (ev.companyId === '__new'){
+      const nm = $('evNewCo').value.trim();
+      if (!nm){ err.textContent = '新しい企業の名前を入れてください。'; return; }
+      if (data.companies.length >= FREE_LIMIT){ err.textContent = `無料版は${FREE_LIMIT}社までです。登録済みの企業を選ぶか、使わない企業を削除してください。`; return; }
+      const now = Date.now();
+      const nc = normalize({ companies:[{ id:uid(), name:nm, created:now, updated:now }] }).companies[0];
+      data.companies.unshift(nc); ev.companyId = nc.id;
     }
     if (editing) data.events = data.events.map(x => x.id === ev.id ? ev : x); else data.events.push(ev);
     closeForm(); scheduleSave();
