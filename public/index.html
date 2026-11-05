@@ -291,6 +291,15 @@ table.cmp .cname{font-weight:600;background:none;border:0;padding:0;cursor:point
 .sheet h2{font-size:20px}
 .sheet section{display:grid;gap:8px}
 .sheet h3{padding-left:0;font-size:15px;font-weight:600;color:var(--ink)}
+
+.grp{display:grid;gap:6px}
+.grp > h3{padding-left:16px}
+.grp-body{background:var(--surface);border-radius:var(--r);padding:14px 16px;display:grid;gap:10px}
+.grp-body .state{margin:0;font-weight:600;font-size:16px}
+.grp-body input[type=file]{font-size:15px;color:var(--muted)}
+.grp-body details summary{list-style:none;display:inline-flex;align-items:center;cursor:pointer}
+.grp-body details summary::-webkit-details-marker{display:none}
+.grp-body details[open] textarea{margin-top:8px}
 @media (prefers-reduced-motion: reduce){*{transition:none!important}}
 </style>
 </head>
@@ -330,29 +339,44 @@ table.cmp .cname{font-weight:600;background:none;border:0;padding:0;cursor:point
     <div class="bar-row"><button class="btn primary" type="button" id="migBtn">引き継ぐ</button><button class="btn danger" type="button" id="migDrop">引き継がずに消す</button></div>
   </div>
 
-  <div class="sheet" id="sheet" hidden>
-    <h2>データの管理</h2>
-    <p class="note">データの控えをコピーしたり、控えから戻したりできます。</p>
-    <section>
-      <h3>バックアップを取る</h3>
-      <div><button class="btn" type="button" id="copyBackup">データをコピー</button></div>
-      <textarea id="backupOut" class="mono" rows="3" readonly hidden></textarea>
-      <p class="ok" id="backupMsg"></p>
-    </section>
-    <hr>
-    <section>
-      <h3>バックアップから戻す</h3>
-      <p class="note">今のデータは、バックアップの内容に置き換わります。</p>
-      <textarea id="restoreIn" class="mono" rows="3" placeholder="コピーしておいたデータを貼り付け"></textarea>
-      <p class="err" id="restoreErr"></p>
-      <div><button class="btn danger" type="button" id="restoreBtn">置き換えて戻す</button></div>
-    </section>
-    <section id="driveOff" hidden>
-      <hr>
-      <h3>Googleドライブとの接続を解除</h3>
-      <p class="note">このアプリからドライブへの保存を止めます。ドライブのファイルは消えません。</p>
-      <div><button class="btn danger" type="button" id="driveDisconnect">接続を解除</button></div>
-    </section>
+  <div class="overlay" id="sheet" hidden>
+    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="sheetH">
+      <div class="grabber" aria-hidden="true"></div>
+      <div class="sheet-head"><span></span><h2 id="sheetH">データの管理</h2><button class="btn ghost strong" type="button" id="sheetClose">完了</button></div>
+
+      <section class="grp">
+        <h3>保存先</h3>
+        <div class="grp-body">
+          <p class="state" id="driveState"></p>
+          <p class="note">Googleドライブに接続すると、あなたのGoogleドライブに専用のファイルを1つ作って、そこに保存します。スマホとパソコンで同じデータを使えて、ブラウザのデータを消しても残ります。</p>
+          <p class="note">このアプリが触れるのは、このアプリが作ったファイルだけです。ほかの写真や書類は見えません。運営者のサーバーにはデータを送りません。</p>
+          <button class="btn primary" type="button" id="driveSheetBtn" hidden>Googleドライブに接続</button>
+          <button class="btn danger" type="button" id="driveDisconnect" hidden>ドライブとの接続を解除</button>
+        </div>
+      </section>
+
+      <section class="grp">
+        <h3>控えを取る（バックアップ）</h3>
+        <div class="grp-body">
+          <p class="note">今のデータを、1つのファイルとして手元に保存します。ドライブのファイルを間違えて消してしまったときや、別のGoogleアカウントに移るときに、このファイルから元に戻せます。</p>
+          <button class="btn" type="button" id="downloadBackup">控えをファイルで保存</button>
+          <button class="linkish" type="button" id="copyBackup">ファイルで保存できないときは、文字でコピー</button>
+          <textarea id="backupOut" class="mono" rows="3" readonly hidden></textarea>
+          <p class="ok" id="backupMsg"></p>
+        </div>
+      </section>
+
+      <section class="grp">
+        <h3>控えから元に戻す</h3>
+        <div class="grp-body">
+          <p class="note">保存しておいた控えのファイルを選びます。<b>今のデータはすべて、控えの内容に置き換わります。</b></p>
+          <input id="restoreFile" type="file" accept=".json,application/json,text/plain">
+          <details><summary class="linkish">文字でコピーした控えを使う場合</summary><textarea id="restoreIn" class="mono" rows="3" placeholder="コピーしておいた文字を貼り付け"></textarea></details>
+          <p class="err" id="restoreErr"></p>
+          <button class="btn danger" type="button" id="restoreBtn">控えの内容に置き換える</button>
+        </div>
+      </section>
+    </div>
   </div>
 
   <div class="main" id="main" data-tab="cal" data-right="co">
@@ -554,7 +578,11 @@ table.cmp .cname{font-weight:600;background:none;border:0;padding:0;cursor:point
     btn.hidden = !Drive.available || !!Drive.token;
     btn.textContent = meta.linked ? 'ドライブと同期' : 'ドライブに接続';
     $('testBanner').hidden = Drive.available;
-    $('driveOff').hidden = !Drive.token;
+    const st = $('driveState'), sb = $('driveSheetBtn');
+    if (!Drive.available){ st.textContent = '今の保存先：このブラウザだけ'; sb.hidden = true; }
+    else if (Drive.token){ st.textContent = '今の保存先：Googleドライブ（接続中）'; sb.hidden = true; }
+    else { st.textContent = meta.linked ? '今の保存先：この端末（ドライブとの接続が切れています）' : '今の保存先：この端末だけ（ドライブ未接続）'; sb.hidden = false; sb.textContent = meta.linked ? 'ドライブと同期' : 'Googleドライブに接続'; }
+    $('driveDisconnect').hidden = !Drive.token;
   }
   const hasContent = (d) => !!d && ((d.companies || []).length + (d.events || []).length + (d.answers || []).length) > 0;
   const Drive = {
@@ -1243,7 +1271,7 @@ table.cmp .cname{font-weight:600;background:none;border:0;padding:0;cursor:point
   $('evCompany').addEventListener('change', () => { const isNew = $('evCompany').value === '__new'; $('evNewCo').hidden = !isNew; if (isNew) $('evNewCo').focus(); });
   $('evCancel').addEventListener('click', closeForm);
   $('evOverlay').addEventListener('click', (e) => { if (e.target === $('evOverlay')) closeForm(); });
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape'){ if (!$('evOverlay').hidden) closeForm(); $('payOverlay').hidden = true; $('driveIntro').hidden = true; } });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape'){ if (!$('evOverlay').hidden) closeForm(); $('payOverlay').hidden = true; $('driveIntro').hidden = true; $('sheet').hidden = true; } });
   $('evForm').addEventListener('submit', (e) => {
     e.preventDefault();
     const err = $('evErr'); err.textContent = '';
@@ -1327,6 +1355,7 @@ table.cmp .cname{font-weight:600;background:none;border:0;padding:0;cursor:point
   });
   $('restoreBtn').addEventListener('click', (e) => {
     const err = $('restoreErr'); err.textContent = '';
+    if (!$('restoreIn').value.trim()){ err.textContent = '先に、控えのファイルを選んでください。'; return; }
     let d; try { d = JSON.parse($('restoreIn').value.trim()); } catch(_){ err.textContent = 'バックアップの形式が正しくありません。'; return; }
     if (!d || !Array.isArray(d.companies)){ err.textContent = 'バックアップの形式が正しくありません。'; return; }
     armButton(e.currentTarget, '今のデータを置き換える', () => { data = normalize(d); persist(); $('restoreIn').value = ''; $('sheet').hidden = true; renderAll(); setStatus('バックアップから戻しました'); });
@@ -1367,6 +1396,22 @@ table.cmp .cname{font-weight:600;background:none;border:0;padding:0;cursor:point
   $('driveBtn').addEventListener('click', () => { if (Meta.get().linked) Drive.connect(); else $('driveIntro').hidden = false; });
   $('driveIntroBtn').addEventListener('click', () => { $('driveIntro').hidden = true; Drive.connect(); });
   $('driveIntroCancel').addEventListener('click', () => { $('driveIntro').hidden = true; });
+  $('driveSheetBtn').addEventListener('click', () => { $('sheet').hidden = true; Drive.connect(); });
+  $('sheetClose').addEventListener('click', () => { $('sheet').hidden = true; });
+  $('sheet').addEventListener('click', (e) => { if (e.target === $('sheet')) $('sheet').hidden = true; });
+  $('restoreFile').addEventListener('change', (e) => {
+    const f = e.target.files && e.target.files[0]; if (!f) return;
+    const r = new FileReader(); r.onload = () => { $('restoreIn').value = String(r.result || '').trim(); $('restoreErr').textContent = ''; }; r.readAsText(f);
+  });
+  $('downloadBackup').addEventListener('click', () => {
+    const d = new Date(), name = `shukatsu-kinko-backup-${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}.json`;
+    try {
+      const url = URL.createObjectURL(new Blob([JSON.stringify(data)], { type:'application/json' }));
+      const a = document.createElement('a'); a.href = url; a.download = name; document.body.append(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      $('backupMsg').textContent = `「${name}」を保存しました。iPhoneなら「ファイル」アプリの「ダウンロード」に入ります。`;
+    } catch(e){ $('backupMsg').textContent = '保存できませんでした。下の「文字でコピー」を使ってください。'; }
+  });
   $('driveIntro').addEventListener('click', (e) => { if (e.target === $('driveIntro')) $('driveIntro').hidden = true; });
   $('useDrive').addEventListener('click', () => { const r = Drive.pendingRemote; Drive.pendingRemote = null; $('conflict').hidden = true; if (r) adoptRemote(r); refreshStatus(); });
   $('useLocal').addEventListener('click', (e) => armButton(e.currentTarget, '本当に上書きする', async () => { Drive.pendingRemote = null; $('conflict').hidden = true; await Drive.flush(); }));
