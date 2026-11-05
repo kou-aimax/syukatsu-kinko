@@ -8,8 +8,9 @@
 - 現在はテスト版で、データはブラウザ（localStorage）に保存している
 
 ## 構成
-- `index.html`：アプリ本体（HTML・CSS・JavaScriptを1ファイルに収めている）
-- 公開先：Cloudflare Pages（予定）
+- `public/index.html`：アプリ本体（HTML・CSS・JavaScriptを1ファイルに収めている）
+- `wrangler.jsonc`：Cloudflare Workers の設定
+- 公開先：Cloudflare Workers（静的サイトとして配信）
 
 ## 料金
 - 無料版：企業10社まで
