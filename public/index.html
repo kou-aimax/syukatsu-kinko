@@ -240,10 +240,24 @@ table.cmp .cname:hover{color:var(--accent)}
   <header class="top">
     <h1>就活マイページ金庫</h1>
     <span class="status" id="status">保存済み</span>
+    <button class="btn small primary" type="button" id="driveBtn" hidden>Googleドライブに接続</button>
     <button class="btn small" type="button" id="backupToggle">バックアップ</button>
   </header>
 
-  <div class="banner" id="testBanner">テスト版：データはこのブラウザに保存されます。公開版では、あなたのGoogleドライブに保存する形に変わります。</div>
+  <div class="banner" id="testBanner">プレビュー版：データはこのブラウザだけに保存されます。公開サイトでは、あなたのGoogleドライブに保存できます。</div>
+  <div class="banner bad" id="driveErr" hidden></div>
+  <div class="sheet" id="driveIntro" hidden>
+    <h2>データはあなたのGoogleドライブに保存します</h2>
+    <p class="note" style="color:var(--ink);font-size:14px">接続すると、あなたのGoogleドライブに専用のファイルを1つ作って、そこに保存します。スマホとパソコンで同じデータを使えて、ブラウザのデータを消しても残ります。</p>
+    <p class="note">このアプリが触れるのは、このアプリが作ったファイルだけです。ほかの写真や書類は見えません。運営者のサーバーにはデータを送りません。</p>
+    <div><button class="btn primary" type="button" id="driveIntroBtn">Googleドライブに接続</button></div>
+  </div>
+  <div class="sheet" id="conflict" hidden>
+    <h2>どちらのデータを使いますか？</h2>
+    <p class="note" style="color:var(--ink);font-size:14px">ドライブにあるデータと、この端末のデータが違っています。</p>
+    <p class="note" id="conflictText"></p>
+    <div class="bar-row"><button class="btn primary" type="button" id="useDrive">ドライブのデータを使う</button><button class="btn danger" type="button" id="useLocal">この端末のデータでドライブを上書き</button></div>
+  </div>
   <div class="banner bad" id="noStore" hidden>このブラウザでは保存できない設定になっています（プライベートモードなど）。閉じるとデータが消えるので、通常のウィンドウで開いてください。</div>
 
   <div class="sheet" id="migrate" hidden>
@@ -256,7 +270,7 @@ table.cmp .cname:hover{color:var(--accent)}
 
   <div class="sheet" id="sheet" hidden>
     <h2>バックアップ</h2>
-    <p class="note">テスト版のデータはこのブラウザにだけあります。ブラウザのデータ削除で消えるので、ときどき保存してください。</p>
+    <p class="note">データの控えをコピーしたり、控えから戻したりできます。</p>
     <section>
       <h3>バックアップを取る</h3>
       <div><button class="btn" type="button" id="copyBackup">データをコピー</button></div>
@@ -270,6 +284,12 @@ table.cmp .cname:hover{color:var(--accent)}
       <textarea id="restoreIn" class="mono" rows="3" placeholder="コピーしておいたデータを貼り付け"></textarea>
       <p class="err" id="restoreErr"></p>
       <div><button class="btn danger" type="button" id="restoreBtn">置き換えて戻す</button></div>
+    </section>
+    <section id="driveOff" hidden>
+      <hr>
+      <h3>Googleドライブとの接続を解除</h3>
+      <p class="note">このアプリからドライブへの保存を止めます。ドライブのファイルは消えません。</p>
+      <div><button class="btn danger" type="button" id="driveDisconnect">接続を解除</button></div>
     </section>
   </div>
 
@@ -392,6 +412,9 @@ table.cmp .cname:hover{color:var(--accent)}
   const FREE_LIMIT = 10;
   const MEMO_MAX = 20;
   const NOTE_LINKS = { fail: '', es: '' }; // noteの記事URLを入れると、見送り時とES画面にリンクが出る
+  const CLIENT_ID = '397026026186-47g0rsp0opb4ihghhm275o8nm5af1dkq.apps.googleusercontent.com';
+  const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file'; // このアプリが作ったファイルだけを扱う
+  const DRIVE_FILE = 'shukatsu-kinko-data.json';
   const WD = ['日','月','火','水','木','金','土'];
   const KINDS = {
     shukatsu:{ label:'就活', color:'var(--k-shu)' },
@@ -450,7 +473,128 @@ table.cmp .cname:hover{color:var(--accent)}
     return d;
   }
   function setStatus(t){ $('status').textContent = t; }
-  function persist(){ const ok = Storage.save(data); setStatus(ok ? '保存済み' : '保存できません'); }
+
+  // ---------- Googleドライブ連携 ----------
+  // 端末（localStorage）にも控えを置き、接続中はドライブの専用ファイルに保存する。
+  const Meta = {
+    get(){ try { return JSON.parse(localStorage.getItem(KEY + '-meta') || '{}'); } catch(e){ return {}; } },
+    set(patch){ try { localStorage.setItem(KEY + '-meta', JSON.stringify(Object.assign(this.get(), patch))); } catch(e){} },
+  };
+  function setDriveError(msg){ const b = $('driveErr'); b.textContent = msg || ''; b.hidden = !msg; }
+  function refreshStatus(localOk = true){
+    const meta = Meta.get();
+    let t;
+    if (!Drive.available) t = localOk ? '保存済み（この端末）' : '保存できません';
+    else if (Drive.busy) t = 'ドライブに保存中…';
+    else if (Drive.token) t = meta.dirty ? '保存待ち…' : 'ドライブに保存済み';
+    else t = 'この端末に保存中（ドライブ未接続）';
+    setStatus(t);
+    const btn = $('driveBtn');
+    btn.hidden = !Drive.available || !!Drive.token;
+    btn.textContent = meta.linked ? 'ドライブと同期' : 'Googleドライブに接続';
+    $('driveIntro').hidden = !Drive.available || !!Drive.token || !!meta.linked;
+    $('testBanner').hidden = Drive.available;
+    $('driveOff').hidden = !Drive.token;
+  }
+  const hasContent = (d) => !!d && ((d.companies || []).length + (d.events || []).length + (d.answers || []).length) > 0;
+  const Drive = {
+    available:false, token:null, expiresAt:0, fileId:null, client:null, timer:null, busy:false, pendingRemote:null,
+    init(){
+      this.client = google.accounts.oauth2.initTokenClient({
+        client_id: CLIENT_ID, scope: DRIVE_SCOPE,
+        callback: (r) => this.onToken(r),
+        error_callback: (e) => { setDriveError(e && e.type === 'popup_failed_to_open' ? 'ログイン画面を開けませんでした。ポップアップのブロックを解除してください。' : ''); refreshStatus(); },
+      });
+      this.available = true; this.fileId = Meta.get().fileId || null; refreshStatus();
+    },
+    connect(){ setDriveError(''); this.client.requestAccessToken({ prompt: Meta.get().linked ? '' : 'consent' }); },
+    async onToken(r){
+      if (!r || r.error || !r.access_token){ setDriveError('Googleドライブに接続できませんでした。もう一度お試しください。'); refreshStatus(); return; }
+      if (window.google && google.accounts.oauth2.hasGrantedAllScopes && !google.accounts.oauth2.hasGrantedAllScopes(r, DRIVE_SCOPE)){
+        setDriveError('ドライブへの保存が許可されませんでした。もう一度接続して、チェックを入れて許可してください。'); refreshStatus(); return;
+      }
+      this.token = r.access_token; this.expiresAt = Date.now() + ((Number(r.expires_in) || 3600) - 60) * 1000;
+      Meta.set({ linked:true }); await this.sync();
+    },
+    expire(){ this.token = null; this.busy = false; refreshStatus(); },
+    async api(url, opts = {}){
+      if (!this.token || Date.now() > this.expiresAt){ this.expire(); throw new Error('auth'); }
+      const res = await fetch(url, Object.assign({}, opts, { headers: Object.assign({}, opts.headers || {}, { Authorization: 'Bearer ' + this.token }) }));
+      if (res.status === 401){ this.expire(); throw new Error('auth'); }
+      if (res.status === 404 && this.fileId){ this.fileId = null; Meta.set({ fileId:null }); throw new Error('gone'); }
+      if (!res.ok) throw new Error('http ' + res.status);
+      return res;
+    },
+    async findFile(){
+      const q = encodeURIComponent(`name='${DRIVE_FILE}' and trashed=false`);
+      const r = await this.api(`https://www.googleapis.com/drive/v3/files?q=${q}&spaces=drive&orderBy=modifiedTime%20desc&fields=files(id%2CmodifiedTime)`);
+      const j = await r.json(); return (j.files && j.files[0]) || null;
+    },
+    async download(id){ const r = await this.api(`https://www.googleapis.com/drive/v3/files/${id}?alt=media`); return r.json(); },
+    async upload(){
+      const body = JSON.stringify(data);
+      if (this.fileId){
+        await this.api(`https://www.googleapis.com/upload/drive/v3/files/${this.fileId}?uploadType=media`, { method:'PATCH', headers:{ 'Content-Type':'application/json' }, body });
+      } else {
+        const b = 'kinko' + Date.now();
+        const meta = { name: DRIVE_FILE, mimeType: 'application/json', description: '就活マイページ金庫のデータ。削除するとアプリのデータが消えます。' };
+        const multi = `--${b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n--${b}\r\nContent-Type: application/json\r\n\r\n${body}\r\n--${b}--`;
+        const r = await this.api('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', { method:'POST', headers:{ 'Content-Type':`multipart/related; boundary=${b}` }, body: multi });
+        this.fileId = (await r.json()).id;
+      }
+      Meta.set({ dirty:false, fileId:this.fileId });
+    },
+    scheduleUpload(){ clearTimeout(this.timer); this.timer = setTimeout(() => this.flush(), 1500); },
+    async flush(){
+      if (!this.token || this.pendingRemote) return;
+      this.busy = true; refreshStatus();
+      try { await this.upload(); setDriveError(''); }
+      catch(e){
+        if (e.message === 'gone'){ try { await this.upload(); setDriveError(''); } catch(_){ setDriveError('ドライブへの保存に失敗しました。通信を確認してください。'); } }
+        else if (e.message !== 'auth') setDriveError('ドライブへの保存に失敗しました。通信を確認してください。この端末には保存されています。');
+        else setDriveError('ドライブとの接続が切れました（1時間ごとに切れます）。「ドライブと同期」を押すと続きから保存します。');
+      }
+      this.busy = false; refreshStatus();
+    },
+    async sync(){
+      this.busy = true; refreshStatus();
+      try {
+        const f = await this.findFile();
+        if (!f){ this.fileId = null; await this.upload(); }
+        else {
+          this.fileId = f.id;
+          const remote = normalize(await this.download(f.id));
+          const meta = Meta.get();
+          if (meta.dirty && hasContent(data) && hasContent(remote) && JSON.stringify(remote) !== JSON.stringify(data)){
+            this.pendingRemote = remote; showConflict(remote);
+          } else if (meta.dirty && hasContent(data) && !hasContent(remote)){
+            await this.upload();
+          } else { adoptRemote(remote); }
+        }
+        setDriveError('');
+      } catch(e){ if (e.message !== 'auth') setDriveError('ドライブのデータを読み込めませんでした。通信を確認して、もう一度「ドライブと同期」を押してください。'); }
+      this.busy = false; refreshStatus();
+    },
+    disconnect(){
+      try { if (this.token) google.accounts.oauth2.revoke(this.token, () => {}); } catch(e){}
+      this.token = null; this.fileId = null; Meta.set({ linked:false, fileId:null }); refreshStatus();
+    },
+  };
+  function adoptRemote(remote){ data = remote; Storage.save(data); Meta.set({ dirty:false, fileId:Drive.fileId }); renderAll(); }
+  function showConflict(remote){
+    const count = (d) => `企業${d.companies.length}社・予定${d.events.length}件・ES${d.answers.length}件`;
+    const when = (d) => d.savedAt ? fmtStamp(d.savedAt) : '不明';
+    $('conflictText').textContent = `ドライブ：${count(remote)}（最終保存 ${when(remote)}）／この端末：${count(data)}（最終保存 ${when(data)}）`;
+    $('conflict').hidden = false; $('conflict').scrollIntoView({ block:'nearest' });
+  }
+
+  function persist(){
+    data.savedAt = Date.now();
+    const ok = Storage.save(data);
+    Meta.set({ dirty:true });
+    if (Drive.token) Drive.scheduleUpload();
+    refreshStatus(ok);
+  }
   function scheduleSave(){ setStatus('保存中…'); clearTimeout(saveTimer); saveTimer = setTimeout(() => { saveTimer = null; persist(); }, 300); }
   window.addEventListener('pagehide', () => { if (saveTimer){ clearTimeout(saveTimer); persist(); } });
 
@@ -1152,6 +1296,18 @@ table.cmp .cname:hover{color:var(--accent)}
   setTab(mq.matches ? 'cal' : 'co');
   renderAll();
   setInterval(() => { if (selDate === todayStr()) drawClock(); }, 60000);
+
+  // ---------- Googleドライブ：イベントと読み込み ----------
+  $('driveBtn').addEventListener('click', () => Drive.connect());
+  $('driveIntroBtn').addEventListener('click', () => Drive.connect());
+  $('useDrive').addEventListener('click', () => { const r = Drive.pendingRemote; Drive.pendingRemote = null; $('conflict').hidden = true; if (r) adoptRemote(r); refreshStatus(); });
+  $('useLocal').addEventListener('click', (e) => armButton(e.currentTarget, '本当に上書きする', async () => { Drive.pendingRemote = null; $('conflict').hidden = true; await Drive.flush(); }));
+  $('driveDisconnect').addEventListener('click', (e) => armButton(e.currentTarget, 'もう一度押すと解除', () => { Drive.disconnect(); $('sheet').hidden = true; }));
+  refreshStatus();
+  const gsi = document.createElement('script');
+  gsi.src = 'https://accounts.google.com/gsi/client'; gsi.async = true;
+  gsi.onload = () => { try { Drive.init(); } catch(e){} };
+  document.head.append(gsi);
 })();
 </script>
 </body>
