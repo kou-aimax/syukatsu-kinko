@@ -116,6 +116,8 @@ header.top h1{font-size:20px;flex:1 1 auto;min-width:0}
 @media (max-width:1100px) and (min-width:900px){.day-view{grid-template-columns:minmax(0,1fr)}}
 @media (max-width:560px){.day-view{grid-template-columns:minmax(0,1fr)}}
 .clock{width:100%;max-width:300px;justify-self:center;display:block}
+.clock-btn{cursor:pointer;width:100%;display:grid;justify-items:center;border-radius:50%}
+.clock-btn:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
 .clock text{font-family:var(--body)}
 .day-title{display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap}
 .day-title h2{font-size:17px;font-variant-numeric:tabular-nums}
@@ -287,7 +289,7 @@ table.cmp .cname:hover{color:var(--accent)}
       </div>
       <div class="card">
         <div class="day-view">
-          <div id="clockWrap"></div>
+          <div style="display:grid;gap:4px;justify-items:center"><div id="clockWrap" class="clock-btn" role="button" tabindex="0" title="タップで表示を切り替え" aria-label="円グラフの表示を切り替え"></div><p class="note" id="clockHint" aria-live="polite" style="min-height:1.2em;text-align:center"></p></div>
           <div style="display:grid;gap:10px;min-width:0">
             <div class="day-title"><h2 id="dayLabel"></h2><span class="count" id="dayCount"></span></div>
             <div class="legend" id="legend"></div>
@@ -437,7 +439,7 @@ table.cmp .cname:hover{color:var(--accent)}
     d.events = Array.isArray(d.events) ? d.events : [];
     d.answers = Array.isArray(d.answers) ? d.answers : [];
     d.submissions = Array.isArray(d.submissions) ? d.submissions : [];
-    d.settings = Object.assign({ coSort:'deadline' }, d.settings || {});
+    d.settings = Object.assign({ coSort:'deadline', clockStyle:'12h' }, d.settings || {});
     d.companies.forEach(c => {
       c.stage = c.stage || '気になる'; c.memos = Array.isArray(c.memos) ? c.memos : [];
       c.memoSort = c.memoSort || 'new'; c.hidden = !!c.hidden; c.fixedOT = !!c.fixedOT;
@@ -557,50 +559,87 @@ table.cmp .cname:hover{color:var(--accent)}
     $('calGrid').replaceChildren(...cells);
   }
 
+  const CLOCK_STYLES = { '12h':'腕時計型（内側＝午前・外側＝午後）', '24':'24時間（0時が上）', 'noon':'24時間（正午が上）' };
   function clockSVG(ds, evs){
-    const C = 160, R1 = 128, R0 = 78;
-    const ang = (min) => (min / 1440) * Math.PI * 2 - Math.PI / 2;
+    const style = CLOCK_STYLES[data.settings.clockStyle] ? data.settings.clockStyle : '12h';
+    const C = 160;
     const xy = (r, a) => [(C + r * Math.cos(a)).toFixed(2), (C + r * Math.sin(a)).toFixed(2)];
     const P = (r, a) => xy(r, a).join(' ');
     const arc = (r0, r1, a0, a1) => { const large = (a1 - a0) > Math.PI ? 1 : 0; return `M${P(r1,a0)} A${r1} ${r1} 0 ${large} 1 ${P(r1,a1)} L${P(r0,a1)} A${r0} ${r0} 0 ${large} 0 ${P(r0,a0)} Z`; };
+    const line = (r0, r1, a, color, w) => { const [x1,y1] = xy(r0,a), [x2,y2] = xy(r1,a); return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" style="stroke:${color}" stroke-width="${w}" stroke-linecap="round"/>`; };
+    // one ring: blocks [{e,s,t}] drawn between r0..r1 using ang()
+    const ring = (blocks, R0, R1, ang, labelSize) => {
+      let s = `<circle cx="${C}" cy="${C}" r="${(R0+R1)/2}" fill="none" style="stroke:var(--track)" stroke-width="${R1-R0}"/>`;
+      const laneEnds = [];
+      blocks.sort((a,b) => a.s - b.s).forEach(b => { let i = laneEnds.findIndex(end => end <= b.s); if (i < 0){ i = laneEnds.length; laneEnds.push(0); } laneEnds[i] = b.t; b.lane = i; });
+      const nL = Math.max(1, laneEnds.length), band = (R1 - R0) / nL;
+      blocks.forEach(b => {
+        const r1 = R1 - b.lane * band, r0 = r1 - band + (nL > 1 ? 2 : 0);
+        s += `<path d="${arc(r0, r1, ang(b.s), ang(b.t - 0.01))}" style="fill:${KINDS[b.e.kind].color}"><title>${esc(`${b.e.start}–${b.e.end} ${b.e.title}`)}</title></path>`;
+        if (nL === 1 && b.t - b.s >= (style === '12h' ? 120 : 100)){
+          const [x,y] = xy((r0+r1)/2, ang((b.s+b.t)/2));
+          s += `<text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="central" font-size="${labelSize}" font-weight="700" style="fill:var(--on-k);pointer-events:none">${esc([...(b.e.title || '')].slice(0, 4).join(''))}</text>`;
+        }
+      });
+      return s;
+    };
     const blocks = evs.filter(e => e.kind !== 'deadline').map(e => ({ e, s:toMin(e.start), t:toMin(e.end) })).filter(b => b.t > b.s);
-    const laneEnds = [];
-    blocks.forEach(b => { let i = laneEnds.findIndex(end => end <= b.s); if (i < 0){ i = laneEnds.length; laneEnds.push(0); } laneEnds[i] = b.t; b.lane = i; });
-    const nL = Math.max(1, laneEnds.length), band = (R1 - R0) / nL;
-    let s = `<svg class="clock" viewBox="0 0 320 320" role="img" aria-label="${esc(fmtMD(ds))}の予定を24時間の円で表示">`;
-    s += `<circle cx="${C}" cy="${C}" r="${(R0+R1)/2}" fill="none" style="stroke:var(--track)" stroke-width="${R1-R0}"/>`;
-    for (let h = 0; h < 24; h++){
-      const a = ang(h*60), big = h % 3 === 0; const [x1,y1] = xy(R1+3,a), [x2,y2] = xy(R1+(big?9:5),a);
-      s += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" style="stroke:var(--muted)" stroke-width="${big?1.6:1}"/>`;
-      if (big){ const [x,y] = xy(R1+21,a); s += `<text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="central" font-size="12" style="fill:var(--muted)">${h}</text>`; }
-    }
-    blocks.forEach(b => {
-      const r1 = R1 - b.lane * band, r0 = r1 - band + (nL > 1 ? 2 : 0);
-      s += `<path d="${arc(r0, r1, ang(b.s), ang(Math.min(b.t, b.s + 1439.9)))}" style="fill:${KINDS[b.e.kind].color}"><title>${esc(`${b.e.start}–${b.e.end} ${b.e.title}`)}</title></path>`;
-      if (nL === 1 && b.t - b.s >= 100){
-        const [x,y] = xy((r0+r1)/2, ang((b.s+b.t)/2));
-        s += `<text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="central" font-size="11" font-weight="700" style="fill:var(--on-k);pointer-events:none">${esc([...(b.e.title || '')].slice(0, 4).join(''))}</text>`;
+    const deadlines = evs.filter(e => e.kind === 'deadline').map(e => ({ e, m:toMin(e.start) }));
+    const nowM = ds === todayStr() ? (() => { const n = new Date(); return n.getHours()*60 + n.getMinutes(); })() : null;
+    let s = `<svg class="clock" viewBox="0 0 320 320" role="img" aria-label="${esc(fmtMD(ds))}の予定（${esc(CLOCK_STYLES[style])}）">`;
+
+    if (style === '12h'){
+      const angAM = (m) => (m / 720) * Math.PI * 2 - Math.PI / 2;
+      const angPM = (m) => ((m - 720) / 720) * Math.PI * 2 - Math.PI / 2;
+      const IN = [76, 100], OUT = [104, 128];
+      const am = blocks.filter(b => b.s < 720).map(b => ({ e:b.e, s:b.s, t:Math.min(b.t, 720) }));
+      const pm = blocks.filter(b => b.t > 720).map(b => ({ e:b.e, s:Math.max(b.s, 720), t:b.t }));
+      s += ring(am, IN[0], IN[1], angAM, 10) + ring(pm, OUT[0], OUT[1], angPM, 10);
+      for (let h = 0; h < 12; h++){
+        const a = angAM(h*60), big = h % 3 === 0;
+        s += line(OUT[1]+3, OUT[1]+(big?9:5), a, 'var(--muted)', big ? 1.6 : 1);
+        if (big){ const [x,y] = xy(OUT[1]+21, a); s += `<text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="central" font-size="12" style="fill:var(--muted)">${h === 0 ? 12 : h}</text>`; }
       }
-    });
-    evs.filter(e => e.kind === 'deadline').forEach(e => {
-      const a = ang(toMin(e.start)); const [x1,y1] = xy(R0-6,a), [x2,y2] = xy(R1+4,a);
-      s += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" style="stroke:var(--k-dead)" stroke-width="3" stroke-linecap="round"><title>${esc(e.start + ' 締切 ' + e.title)}</title></line><circle cx="${x2}" cy="${y2}" r="4.5" style="fill:var(--k-dead)"/>`;
-    });
-    if (ds === todayStr()){
-      const n = new Date(), a = ang(n.getHours()*60 + n.getMinutes()); const [x1,y1] = xy(R0-16,a), [x2,y2] = xy(R1,a);
-      s += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" style="stroke:var(--ink)" stroke-width="2" stroke-linecap="round"/><circle cx="${x1}" cy="${y1}" r="3.5" style="fill:var(--ink)"/>`;
+      deadlines.forEach(({ e, m }) => {
+        const pmSide = m >= 720, a = pmSide ? angPM(m) : angAM(m), R = pmSide ? OUT : IN;
+        s += `<g><title>${esc(e.start + ' 締切 ' + e.title)}</title>${line(R[0]-3, R[1]+3, a, 'var(--k-dead)', 3)}<circle cx="${xy(R[1]+3,a)[0]}" cy="${xy(R[1]+3,a)[1]}" r="4" style="fill:var(--k-dead)"/></g>`;
+      });
+      if (nowM != null){ const pmSide = nowM >= 720, a = pmSide ? angPM(nowM) : angAM(nowM), R = pmSide ? OUT : IN; s += line(R[0]-10, R[1], a, 'var(--ink)', 2) + `<circle cx="${xy(R[0]-10,a)[0]}" cy="${xy(R[0]-10,a)[1]}" r="3" style="fill:var(--ink)"/>`; }
+    } else {
+      const shift = style === 'noon' ? 720 : 0;
+      const ang = (m) => ((m - shift) / 1440) * Math.PI * 2 - Math.PI / 2;
+      const R0 = 78, R1 = 128;
+      s += ring(blocks, R0, R1, ang, 11);
+      for (let h = 0; h < 24; h++){
+        const a = ang(h*60), big = h % 3 === 0;
+        s += line(R1+3, R1+(big?9:5), a, 'var(--muted)', big ? 1.6 : 1);
+        if (big){ const [x,y] = xy(R1+21, a); s += `<text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="central" font-size="12" style="fill:var(--muted)">${h}</text>`; }
+      }
+      deadlines.forEach(({ e, m }) => { const a = ang(m); s += `<g><title>${esc(e.start + ' 締切 ' + e.title)}</title>${line(R0-6, R1+4, a, 'var(--k-dead)', 3)}<circle cx="${xy(R1+4,a)[0]}" cy="${xy(R1+4,a)[1]}" r="4.5" style="fill:var(--k-dead)"/></g>`; });
+      if (nowM != null){ const a = ang(nowM); s += line(R0-16, R1, a, 'var(--ink)', 2) + `<circle cx="${xy(R0-16,a)[0]}" cy="${xy(R0-16,a)[1]}" r="3.5" style="fill:var(--ink)"/>`; }
     }
     const d = parseYmd(ds);
-    s += `<text x="${C}" y="${C-8}" text-anchor="middle" font-size="22" font-weight="700" style="fill:var(--ink)">${d.getMonth()+1}/${d.getDate()}</text>`;
-    s += `<text x="${C}" y="${C+18}" text-anchor="middle" font-size="13" style="fill:var(--muted)">${WD[d.getDay()]}曜・${evs.length ? '予定 ' + evs.length + '件' : '予定なし'}</text>`;
+    s += `<text x="${C}" y="${C-10}" text-anchor="middle" font-size="22" font-weight="700" style="fill:var(--ink)">${d.getMonth()+1}/${d.getDate()}</text>`;
+    s += `<text x="${C}" y="${C+14}" text-anchor="middle" font-size="12.5" style="fill:var(--muted)">${WD[d.getDay()]}曜・${evs.length ? '予定 ' + evs.length + '件' : '予定なし'}</text>`;
+    if (style === '12h') s += `<text x="${C}" y="${C+34}" text-anchor="middle" font-size="10.5" style="fill:var(--muted)">内側 午前／外側 午後</text>`;
     return s + '</svg>';
+  }
+  function drawClock(){ $('clockWrap').innerHTML = clockSVG(selDate, eventsOn(selDate)); }
+  let clockHintTimer = null;
+  function cycleClock(){
+    const keys = ['12h','24','noon'];
+    const cur = CLOCK_STYLES[data.settings.clockStyle] ? data.settings.clockStyle : '12h';
+    data.settings.clockStyle = keys[(keys.indexOf(cur) + 1) % keys.length];
+    scheduleSave(); drawClock();
+    const h = $('clockHint'); h.textContent = '表示：' + CLOCK_STYLES[data.settings.clockStyle];
+    clearTimeout(clockHintTimer); clockHintTimer = setTimeout(() => h.textContent = '', 2000);
   }
 
   function renderDay(){
     const evs = eventsOn(selDate);
     $('dayLabel').textContent = fmtMD(selDate) + (selDate === todayStr() ? ' 今日' : '');
     $('dayCount').textContent = evs.length ? `${evs.length}件` : '';
-    $('clockWrap').innerHTML = clockSVG(selDate, evs);
+    drawClock();
     if (!evs.length){ $('legend').replaceChildren(el('p', { class:'none', text:'この日の予定はありません。「＋ 予定を追加」から登録できます。' })); return; }
     $('legend').replaceChildren(...evs.map(ev => {
       const co = ev.companyId ? companyById(ev.companyId) : null;
@@ -1047,6 +1086,8 @@ table.cmp .cname:hover{color:var(--accent)}
   $('prevM').addEventListener('click', () => { viewMonth = new Date(viewMonth.getFullYear(), viewMonth.getMonth() - 1, 1); renderCalendar(); });
   $('nextM').addEventListener('click', () => { viewMonth = new Date(viewMonth.getFullYear(), viewMonth.getMonth() + 1, 1); renderCalendar(); });
   $('todayBtn').addEventListener('click', () => goToDate(todayStr()));
+  $('clockWrap').addEventListener('click', cycleClock);
+  $('clockWrap').addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); cycleClock(); } });
   $('addEvBtn').addEventListener('click', () => openForm(null, {}));
   $('search').addEventListener('input', renderList);
   $('hiddenToggle').addEventListener('click', () => { showHiddenCo = !showHiddenCo; renderList(); });
@@ -1111,7 +1152,7 @@ table.cmp .cname:hover{color:var(--accent)}
   fillSortSelect($('coSort'));
   setTab(mq.matches ? 'cal' : 'co');
   renderAll();
-  setInterval(() => { if (selDate === todayStr()) $('clockWrap').innerHTML = clockSVG(selDate, eventsOn(selDate)); }, 60000);
+  setInterval(() => { if (selDate === todayStr()) drawClock(); }, 60000);
 })();
 </script>
 </body>
