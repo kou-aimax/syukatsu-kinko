@@ -2,6 +2,8 @@
   // Cloudflare Workers の設定。public フォルダの中身をそのままサイトとして公開する
   "name": "syukatsu-kinko",
   "compatibility_date": "2025-09-01",
+  // workers.dev のURL（syukatsu-kinko.〇〇.workers.dev）で公開する
+  "workers_dev": true,
   "assets": {
     "directory": "./public"
   }
