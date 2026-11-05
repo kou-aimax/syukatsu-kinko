@@ -95,6 +95,7 @@ header.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background
   display:flex;align-items:center;gap:8px;flex-wrap:wrap;border-bottom:.5px solid var(--line)}
 header.top h1{font-size:28px;font-weight:700;letter-spacing:-.02em;flex:1 1 auto;min-width:0}
 header.top .btn{min-height:34px;font-size:15px;padding:0 12px}
+header.top .btn.icon{padding:0 7px;min-width:34px}
 .status{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
 
 /* main layout */
@@ -116,10 +117,9 @@ header.top .btn{min-height:34px;font-size:15px;padding:0 12px}
 /* tab bar (phones) */
 @media (max-width:899px){
   body{padding-bottom:calc(72px + env(safe-area-inset-bottom,0px))}
-  header.top{padding-block:8px 10px}
-  header.top h1{order:2;flex-basis:100%;font-size:30px}
-  header.top .status{order:1;flex:1 1 auto;min-width:0}
-  header.top .btn{order:1}
+  header.top{flex-wrap:nowrap;padding-block:8px}
+  header.top h1{font-size:17px;font-weight:600;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  header.top .status{font-size:12px;white-space:nowrap}
   .main{grid-template-columns:minmax(0,1fr);margin-top:16px}
   .tabs{position:fixed;left:0;right:0;bottom:0;z-index:8;border-radius:0;padding:6px max(8px,env(safe-area-inset-right,0px)) calc(6px + env(safe-area-inset-bottom,0px)) max(8px,env(safe-area-inset-left,0px));
     background:var(--bar);-webkit-backdrop-filter:saturate(180%) blur(20px);backdrop-filter:saturate(180%) blur(20px);border-top:.5px solid var(--line);gap:0}
@@ -299,17 +299,20 @@ table.cmp .cname{font-weight:600;background:none;border:0;padding:0;cursor:point
   <header class="top">
     <h1>就活マイページ金庫</h1>
     <span class="status" id="status">保存済み</span>
-    <button class="btn small primary" type="button" id="driveBtn" hidden>Googleドライブに接続</button>
-    <button class="btn small" type="button" id="backupToggle">バックアップ</button>
+    <button class="btn small primary" type="button" id="driveBtn" hidden>ドライブに接続</button>
+    <button class="btn small icon" type="button" id="backupToggle" aria-label="データの管理（バックアップ・接続の解除）" title="データの管理"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button>
   </header>
 
-  <div class="banner" id="testBanner">プレビュー版：データはこのブラウザだけに保存されます。公開サイトでは、あなたのGoogleドライブに保存できます。</div>
+  <div class="banner" id="testBanner">プレビュー版：データはこのブラウザだけに保存されます。</div>
   <div class="banner bad" id="driveErr" hidden></div>
-  <div class="sheet" id="driveIntro" hidden>
-    <h2>データはあなたのGoogleドライブに保存します</h2>
-    <p class="note" style="color:var(--ink);font-size:14px">接続すると、あなたのGoogleドライブに専用のファイルを1つ作って、そこに保存します。スマホとパソコンで同じデータを使えて、ブラウザのデータを消しても残ります。</p>
-    <p class="note">このアプリが触れるのは、このアプリが作ったファイルだけです。ほかの写真や書類は見えません。運営者のサーバーにはデータを送りません。</p>
-    <div><button class="btn primary" type="button" id="driveIntroBtn">Googleドライブに接続</button></div>
+  <div class="overlay" id="driveIntro" hidden>
+    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="driveIntroH">
+      <div class="grabber" aria-hidden="true"></div>
+      <h2 id="driveIntroH">データをGoogleドライブに保存</h2>
+      <p class="note" style="color:var(--ink);font-size:16px">あなたのGoogleドライブに専用のファイルを1つ作って、そこに保存します。スマホとパソコンで同じデータを使えて、ブラウザのデータを消しても残ります。</p>
+      <p class="note">このアプリが触れるのは、このアプリが作ったファイルだけです。ほかの写真や書類は見えません。運営者のサーバーにはデータを送りません。</p>
+      <div style="display:grid;gap:8px"><button class="btn primary" type="button" id="driveIntroBtn">Googleで続ける</button><button class="btn ghost" type="button" id="driveIntroCancel">あとで</button></div>
+    </div>
   </div>
   <div class="sheet" id="conflict" hidden>
     <h2>どちらのデータを使いますか？</h2>
@@ -328,7 +331,7 @@ table.cmp .cname{font-weight:600;background:none;border:0;padding:0;cursor:point
   </div>
 
   <div class="sheet" id="sheet" hidden>
-    <h2>バックアップ</h2>
+    <h2>データの管理</h2>
     <p class="note">データの控えをコピーしたり、控えから戻したりできます。</p>
     <section>
       <h3>バックアップを取る</h3>
@@ -542,15 +545,14 @@ table.cmp .cname{font-weight:600;background:none;border:0;padding:0;cursor:point
   function refreshStatus(localOk = true){
     const meta = Meta.get();
     let t;
-    if (!Drive.available) t = localOk ? '保存済み（この端末）' : '保存できません';
-    else if (Drive.busy) t = 'ドライブに保存中…';
-    else if (Drive.token) t = meta.dirty ? '保存待ち…' : 'ドライブに保存済み';
-    else t = 'この端末に保存中（ドライブ未接続）';
+    if (!Drive.available) t = localOk ? '端末に保存済み' : '保存できません';
+    else if (Drive.busy) t = '保存中…';
+    else if (Drive.token) t = meta.dirty ? '保存待ち…' : '保存済み';
+    else t = meta.dirty && meta.linked ? '未同期あり' : '';
     setStatus(t);
     const btn = $('driveBtn');
     btn.hidden = !Drive.available || !!Drive.token;
-    btn.textContent = meta.linked ? 'ドライブと同期' : 'Googleドライブに接続';
-    $('driveIntro').hidden = !Drive.available || !!Drive.token || !!meta.linked;
+    btn.textContent = meta.linked ? 'ドライブと同期' : 'ドライブに接続';
     $('testBanner').hidden = Drive.available;
     $('driveOff').hidden = !Drive.token;
   }
@@ -1241,7 +1243,7 @@ table.cmp .cname{font-weight:600;background:none;border:0;padding:0;cursor:point
   $('evCompany').addEventListener('change', () => { const isNew = $('evCompany').value === '__new'; $('evNewCo').hidden = !isNew; if (isNew) $('evNewCo').focus(); });
   $('evCancel').addEventListener('click', closeForm);
   $('evOverlay').addEventListener('click', (e) => { if (e.target === $('evOverlay')) closeForm(); });
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape'){ if (!$('evOverlay').hidden) closeForm(); $('payOverlay').hidden = true; } });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape'){ if (!$('evOverlay').hidden) closeForm(); $('payOverlay').hidden = true; $('driveIntro').hidden = true; } });
   $('evForm').addEventListener('submit', (e) => {
     e.preventDefault();
     const err = $('evErr'); err.textContent = '';
@@ -1362,8 +1364,10 @@ table.cmp .cname{font-weight:600;background:none;border:0;padding:0;cursor:point
   setInterval(() => { if (selDate === todayStr()) drawClock(); }, 60000);
 
   // ---------- Googleドライブ：イベントと読み込み ----------
-  $('driveBtn').addEventListener('click', () => Drive.connect());
-  $('driveIntroBtn').addEventListener('click', () => Drive.connect());
+  $('driveBtn').addEventListener('click', () => { if (Meta.get().linked) Drive.connect(); else $('driveIntro').hidden = false; });
+  $('driveIntroBtn').addEventListener('click', () => { $('driveIntro').hidden = true; Drive.connect(); });
+  $('driveIntroCancel').addEventListener('click', () => { $('driveIntro').hidden = true; });
+  $('driveIntro').addEventListener('click', (e) => { if (e.target === $('driveIntro')) $('driveIntro').hidden = true; });
   $('useDrive').addEventListener('click', () => { const r = Drive.pendingRemote; Drive.pendingRemote = null; $('conflict').hidden = true; if (r) adoptRemote(r); refreshStatus(); });
   $('useLocal').addEventListener('click', (e) => armButton(e.currentTarget, '本当に上書きする', async () => { Drive.pendingRemote = null; $('conflict').hidden = true; await Drive.flush(); }));
   $('driveDisconnect').addEventListener('click', (e) => armButton(e.currentTarget, 'もう一度押すと解除', () => { Drive.disconnect(); $('sheet').hidden = true; }));
