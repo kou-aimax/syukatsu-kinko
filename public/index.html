@@ -242,7 +242,7 @@ table.cmp .cname{font-weight:600;background:none;border:0;padding:0;cursor:point
 
 /* segmented choices */
 .seg{display:flex;flex-wrap:wrap;gap:8px}
-.seg label{display:inline-flex;align-items:center;gap:6px;border:0;border-radius:999px;padding:0 14px;min-height:34px;cursor:pointer;color:var(--ink);font-size:15px;background:var(--track)}
+.seg label{position:relative;display:inline-flex;align-items:center;gap:6px;border:0;border-radius:999px;padding:0 14px;min-height:34px;cursor:pointer;color:var(--ink);font-size:15px;background:var(--track)}
 .seg input{position:absolute;opacity:0;pointer-events:none}
 .seg label:has(input:checked){background:var(--accent);color:var(--accent-ink);font-weight:600}
 .seg label:has(input:focus-visible){outline:3px solid color-mix(in srgb,var(--accent) 55%,transparent);outline-offset:2px}
@@ -250,8 +250,9 @@ table.cmp .cname{font-weight:600;background:none;border:0;padding:0;cursor:point
 #evKinds label:has(input:checked){background:color-mix(in srgb,var(--kc) 24%,var(--surface));color:var(--ink);box-shadow:inset 0 0 0 2px var(--kc)}
 #evKinds .sw{width:12px;height:12px}
 .wd label{width:40px;justify-content:center;padding:0}
-#esCats{flex-wrap:nowrap;overflow-x:auto;padding-bottom:2px}
-#esCats label{white-space:nowrap}
+#esCats{flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain}
+#esCats::-webkit-scrollbar{display:none}
+#esCats label{white-space:nowrap;flex-shrink:0;position:relative}
 
 /* ES answers */
 .ans{background:var(--surface);border-radius:var(--r);overflow:hidden}
